@@ -72,25 +72,15 @@ def salvar_na_planilha(tipo: str, valor: float, categoria: str):
 
 @app.post("/webhook")
 async def receber_webhook(request: Request):
-    """
-    Esta é a rota principal que a Evolution API irá chamar.
-    """
+
     try:
         dados = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="JSON inválido.")
+    
 
-    # 2. Extrai o texto da mensagem
-    # IMPORTANTE: A estrutura do JSON (ex: 'data', 'message', 'body')
-    # vai depender EXATAMENTE do que a Evolution API envia.
-    # Estamos "chutando" uma estrutura aqui para fins de teste.
-    # Quando integrarmos, teremos que ajustar isso.
     try:
-        # Chute de estrutura 1:
-        # texto_mensagem = dados['data']['message']['body']
-        
-        # Chute de estrutura 2 (vamos usar este para testar):
-        texto_mensagem = dados['mensagem']
+        texto_mensagem = dados['data']['message']['conversation']
         print(f"Mensagem recebida: {texto_mensagem}")
 
     except KeyError:
