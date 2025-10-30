@@ -1,36 +1,59 @@
 import streamlit as st
 import pandas as pd
 import os
+import gspread
+from google.oauth2.service_account import Credentials
+
+SCOPES = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive.file'
+]
+
+CREDS_FILE = "finance-476501-419c2e6758cf.json"
+SHEET_NAME = "FINANÇAS"
+
+creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
+client = gspread.authorize(creds)
+
+try:
+    spreadsheet = client.open(SHEET_NAME)
+    worksheet = spreadsheet.sheet1
+    print("Conectado ao Google Sheets com sucesso!")
+except gspread.exceptions.SpreadsheetNotFound:
+    print(f"ERRO: Planilha '{SHEET_NAME}' não encontrada. Você a compartilhou com o e-mail de serviço?")
+    exit()
 
 
 st.set_page_config(
     page_title="Meu Dashboard de Finanças",
     layout="wide"  
 )
-ARQUIVO_PLANILHA = 'data/gastos.xlsx'
 
-# --- Função para Carregar os Dados ---
-# O decorator @st.cache_data "guarda" o resultado da função
-@st.cache_data
-def carregar_dados(caminho_arquivo):
+@st.cache_data(ttl=60)
+def carregar_dados():
     """
     Carrega a planilha Excel. Retorna um DataFrame vazio se o arquivo não existir.
     """
-    if not os.path.exists(caminho_arquivo):
-        return pd.DataFrame(columns=['Data', 'Tipo', 'Valor', 'Categoria'])
-    
     try:
-        df = pd.read_excel(caminho_arquivo, engine='openpyxl')
+        dados = worksheet.get_all_records()
+        
+        if not dados:
+            return pd.DataFrame(columns=['Data', 'Tipo', 'Valor', 'Categoria'])
+            
+        df = pd.DataFrame(dados)
+        
         df['Data'] = pd.to_datetime(df['Data'])
+        df['Valor'] = pd.to_numeric(df['Valor'])
         return df
+        
     except Exception as e:
-        st.error(f"Erro ao carregar o arquivo: {e}")
+        st.error(f"Erro ao carregar dados do Google Sheets: {e}")
         return pd.DataFrame(columns=['Data', 'Tipo', 'Valor', 'Categoria'])
 
 
 st.title("Meu Dashboard de Finanças Pessoais 📈")
 
-df = carregar_dados(ARQUIVO_PLANILHA)
+df = carregar_dados()
 
 if df.empty:
     st.warning("Nenhum dado encontrado. Envie sua primeira despesa pelo WhatsApp!")

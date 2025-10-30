@@ -1,12 +1,31 @@
 import pandas as pd
 import uvicorn
+import gspread
+from google.oauth2.service_account import Credentials
 from fastapi import FastAPI, Request, HTTPException
 from datetime import datetime
 import os
+import httpx
+import requests
+
+SCOPES = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive.file'
+]
 
 
-ARQUIVO_PLANILHA = 'data/gastos.xlsx'
-COLUNAS = ['Data', 'Tipo', 'Valor', 'Categoria']
+
+creds = Credentials.from_service_account_file(os.getenv("CREDS_FILE"), scopes=SCOPES)
+client = gspread.authorize(creds)
+
+try:
+    spreadsheet = client.open_by_key(os.getenv("SHEET_ID"))
+    worksheet = spreadsheet.sheet1
+    print("Conectado ao Google Sheets com sucesso!")
+except gspread.exceptions.SpreadsheetNotFound:
+    print(f"ERRO: Planilha '{os.getenv('SHEET_ID')}' não encontrada. Você a compartilhou com o e-mail de serviço?")
+    exit()
+
 
 app = FastAPI()
 
@@ -44,30 +63,16 @@ def salvar_na_planilha(tipo: str, valor: float, categoria: str):
     Carrega a planilha, adiciona a nova linha e salva.
     """
     print(f"Iniciando salvamento: {tipo}, {valor}, {categoria}")
-    data_atual = datetime.now()
+    data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    nova_linha_df = pd.DataFrame(
-        [[data_atual, tipo, valor, categoria]],  
-        columns=COLUNAS                         
-    )
-
-    if not os.path.exists(ARQUIVO_PLANILHA):
-        print("Arquivo não existe. Criando novo...")
-        nova_linha_df.to_excel(ARQUIVO_PLANILHA, index=False, engine='openpyxl')
-    else:
-        print("Arquivo existe. Carregando e concatenando...")
-        try:
-            df_antigo = pd.read_excel(ARQUIVO_PLANILHA, engine='openpyxl')
-            
-            df_novo = pd.concat([df_antigo, nova_linha_df], ignore_index=True)
-            
-            df_novo.to_excel(ARQUIVO_PLANILHA, index=False, engine='openpyxl')
-        except Exception as e:
-            print(f"Erro ao ler ou salvar o Excel: {e}")
-            # Em um caso real, poderíamos salvar em um ".backup"
-            return
-            
-    print("Salvo com sucesso!")
+    try:
+        nova_linha = [data_atual, tipo, valor, categoria]
+        worksheet.append_row(nova_linha)
+        
+        print("Salvo no Google Sheets com sucesso!")
+    
+    except Exception as e:
+        print(f"Erro ao salvar no Google Sheets: {e}")
 
 
 @app.post("/webhook")
@@ -80,12 +85,19 @@ async def receber_webhook(request: Request):
     
 
     try:
+        remote_jid = dados['data']['key']['remoteJid']
+        key = dados['data']['key']
         texto_mensagem = dados['data']['message']['conversation']
-        print(f"Mensagem recebida: {texto_mensagem}")
 
-    except KeyError:
-        print(f"Estrutura do JSON inesperada. JSON recebido: {dados}")
-        raise HTTPException(status_code=422, detail="JSON com formato inesperado.")
+    except (KeyError, TypeError):
+        print("Evento ignorado (não é uma mensagem de conversa padrão).")
+        return {"status": "evento ignorado (estrutura de JSON não esperada)"}
+    
+    if remote_jid != os.getenv("group"):
+        print(f"Mensagem ignorada (veio de {remote_jid}, não do grupo alvo).")
+        return {"status": "mensagem ignorada (não é do grupo alvo)"}
+    
+    print(f'mensagem recebida: {texto_mensagem}')
 
     dados_parseados = parse_mensagem(texto_mensagem)
     
@@ -94,10 +106,65 @@ async def receber_webhook(request: Request):
         return {"status": "mensagem ignorada"}
 
     tipo, valor, categoria = dados_parseados
-    salvar_na_planilha(tipo, valor, categoria)
+    try:
+        salvar_na_planilha(tipo, valor, categoria)
 
-    return {"status": "processado com sucesso"}
+        await enviar_reacao(key, "👍")
 
+    except Exception as e:
+        print(f"Erro ao salvar: {e}")
+        await enviar_reacao(key, "❌")
+
+    return {"status": "processado"}
+
+async def enviar_reacao(key: dict, reaction: str):
+    """
+    Envia uma reação para uma mensagem específica usando a Evolution API.
+    """
+    print(f"Enviando reação '{reaction}' para {key}")
+
+    url_endpoint = f"{os.getenv("EVOLUTION_API_URL")}/message/sendReaction/manu"
+
+    payload = {
+    "key": {
+        "remoteJid": key['remoteJid'],
+        "fromMe": True,
+        "id": key['id']
+    },
+    "reaction": reaction
+}
+
+    headers = {
+        "apikey": os.getenv("EVOLUTION_API_KEY"),
+        "Content-Type": "application/json"
+    }
+
+    
+
+    print(f"Payload enviado: {payload}")
+    print("KEY RECEBIDA:", key)
+
+    response = requests.post(url_endpoint, json=payload, headers=headers, timeout=30.0)
+
+    print(response.json())
+
+
+    ''' try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url_endpoint, json=payload, headers=headers, timeout=30.0)
+        
+        print(f"Status da resposta: {response.status_code}")
+        print(f"Resposta da API: {response.text}")
+
+        if response.status_code in [200, 201]:
+            print("Reação enviada com sucesso.")
+        else:
+            print(f"Erro ao enviar reação: {response.status_code} - {response.text}")
+
+    except Exception as e:
+        print(f"Exceção ao enviar reação: {e}")
+
+'''
 # --- Ponto de entrada para rodar o servidor ---
 if __name__ == "__main__":
     print("Iniciando servidor FastAPI local em http://127.0.0.1:8000")
