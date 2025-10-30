@@ -1,4 +1,3 @@
-import pandas as pd
 import uvicorn
 import gspread
 from google.oauth2.service_account import Credentials
@@ -7,6 +6,7 @@ from datetime import datetime
 import os
 import httpx
 import requests
+import json
 
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
@@ -15,7 +15,8 @@ SCOPES = [
 
 
 
-creds = Credentials.from_service_account_file(os.getenv("CREDS_FILE"), scopes=SCOPES)
+creds_info = json.loads(os.getenv("GOOGLE_CREDENTIALS_JSON"))
+creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
 client = gspread.authorize(creds)
 
 try:
