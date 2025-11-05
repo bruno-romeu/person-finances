@@ -3,24 +3,26 @@ import pandas as pd
 import os
 import gspread
 from google.oauth2.service_account import Credentials
+import json
+from dotenv import load_dotenv
 
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive.file'
 ]
 
-CREDS_FILE = "finance-476501-419c2e6758cf.json"
-SHEET_NAME = "FINANÇAS"
+load_dotenv()
 
-creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
+creds_info = json.loads(os.getenv("GOOGLE_CREDENTIALS_JSON"))
+creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
 client = gspread.authorize(creds)
 
 try:
-    spreadsheet = client.open(SHEET_NAME)
+    spreadsheet = client.open_by_key(os.getenv("SHEET_ID"))
     worksheet = spreadsheet.sheet1
     print("Conectado ao Google Sheets com sucesso!")
 except gspread.exceptions.SpreadsheetNotFound:
-    print(f"ERRO: Planilha '{SHEET_NAME}' não encontrada. Você a compartilhou com o e-mail de serviço?")
+    print(f"ERRO: Planilha '{os.getenv('SHEET_ID')}' não encontrada. Você a compartilhou com o e-mail de serviço?")
     exit()
 
 
@@ -38,17 +40,18 @@ def carregar_dados():
         dados = worksheet.get_all_records()
         
         if not dados:
-            return pd.DataFrame(columns=['Data', 'Tipo', 'Valor', 'Categoria'])
+            return pd.DataFrame(columns=['DATA', 'TIPO', 'VALOR', 'CATEGORIA'])
             
         df = pd.DataFrame(dados)
         
-        df['Data'] = pd.to_datetime(df['Data'])
-        df['Valor'] = pd.to_numeric(df['Valor'])
+        df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
+        df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce')
+        df['VALOR'] = df['VALOR'].fillna(0)
         return df
         
     except Exception as e:
         st.error(f"Erro ao carregar dados do Google Sheets: {e}")
-        return pd.DataFrame(columns=['Data', 'Tipo', 'Valor', 'Categoria'])
+        return pd.DataFrame(columns=['DATA', 'TIPO', 'VALOR', 'CATEGORIA'])
 
 
 st.title("Meu Dashboard de Finanças Pessoais 📈")
@@ -60,11 +63,11 @@ if df.empty:
 else:
     st.subheader("Resumo Financeiro")
     
-    receitas_df = df[df['Tipo'] == 'receita']
-    gastos_df = df[df['Tipo'] == 'gasto']
+    receitas_df = df[df['TIPO'] == 'receita']
+    gastos_df = df[df['TIPO'] == 'gasto']
 
-    total_receitas = receitas_df['Valor'].sum()
-    total_gastos = gastos_df['Valor'].sum()
+    total_receitas = receitas_df['VALOR'].sum()
+    total_gastos = gastos_df['VALOR'].sum()
     saldo = total_receitas - total_gastos
 
     col1, col2, col3 = st.columns(3)
@@ -80,7 +83,7 @@ else:
 
     st.subheader("Análise de Gastos")
 
-    gastos_por_categoria = gastos_df.groupby('Categoria')['Valor'].sum().sort_values(ascending=False)
+    gastos_por_categoria = gastos_df.groupby('CATEGORIA')['VALOR'].sum().sort_values(ascending=False)
     
     if not gastos_por_categoria.empty:
         st.bar_chart(gastos_por_categoria)
@@ -90,4 +93,4 @@ else:
     st.subheader("Todos os Lançamentos")
     # st.dataframe(df) usa a tela inteira
     # st.write(df) é mais simples
-    st.dataframe(df.sort_values(by='Data', ascending=False), use_container_width=True)
+    st.dataframe(df.sort_values(by='DATA', ascending=False), use_container_width=True)

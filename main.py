@@ -7,13 +7,14 @@ import os
 import httpx
 import requests
 import json
+from dotenv import load_dotenv
 
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive.file'
 ]
 
-
+load_dotenv()
 
 creds_info = json.loads(os.getenv("GOOGLE_CREDENTIALS_JSON"))
 creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
@@ -63,7 +64,6 @@ def salvar_na_planilha(tipo: str, valor: float, categoria: str):
     """
     Carrega a planilha, adiciona a nova linha e salva.
     """
-    print(f"Iniciando salvamento: {tipo}, {valor}, {categoria}")
     data_atual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     try:
