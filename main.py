@@ -4,7 +4,6 @@ from google.oauth2.service_account import Credentials
 from fastapi import FastAPI, Request, HTTPException
 from datetime import datetime
 import os
-import httpx
 import requests
 import json
 from dotenv import load_dotenv
