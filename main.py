@@ -30,6 +30,27 @@ except gspread.exceptions.SpreadsheetNotFound:
 
 app = FastAPI()
 
+
+@app.get("/")
+async def root():
+    """Health check endpoint - mantém o serviço acordado"""
+    return {"status": "online", "service": "financas-webhook"}
+
+@app.get("/health")
+async def health():
+    """Health check alternativo"""
+    return {"status": "healthy"}
+
+@app.post("/webhook")
+async def receber_webhook(request: Request):
+    """Webhook principal (retrocompatibilidade)"""
+    return await processar_mensagem(request)
+
+@app.post("/webhook/messages-upsert")
+async def receber_webhook_messages(request: Request):
+    """Webhook específico para mensagens novas"""
+    return await processar_mensagem(request)
+
 def parse_mensagem(texto: str):
     """
     Recebe uma string como "gasto 400 comida" e a divide.
@@ -117,14 +138,56 @@ async def receber_webhook(request: Request):
 
     return {"status": "processado"}
 
+
+async def processar_mensagem(request: Request):
+    try:
+        dados = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON inválido.")
+    
+    try:
+        remote_jid = dados['data']['key']['remoteJid']
+        key = dados['data']['key']
+        texto_mensagem = dados['data']['message']['conversation']
+
+    except (KeyError, TypeError):
+        print("Evento ignorado (não é uma mensagem de conversa padrão).")
+        return {"status": "evento ignorado (estrutura de JSON não esperada)"}
+    
+    group_id = os.getenv("group")
+    if remote_jid != group_id:
+        print(f"Mensagem ignorada (veio de {remote_jid}, não do grupo alvo).")
+        return {"status": "mensagem ignorada (não é do grupo alvo)"}
+    
+    print(f'mensagem recebida: {texto_mensagem}')
+
+    dados_parseados = parse_mensagem(texto_mensagem)
+    
+    if dados_parseados is None:
+        print("Mensagem ignorada (não é um comando de finanças).")
+        return {"status": "mensagem ignorada"}
+
+    tipo, valor, categoria = dados_parseados
+    try:
+        salvar_na_planilha(tipo, valor, categoria)
+        await enviar_reacao(key, "👍")
+
+    except Exception as e:
+        print(f"Erro ao salvar: {e}")
+        await enviar_reacao(key, "❌")
+
+    return {"status": "processado"}
+
+
 async def enviar_reacao(key: dict, reaction: str):
     """
     Envia uma reação para uma mensagem específica usando a Evolution API.
     """
     print(f"Enviando reação '{reaction}' para {key}")
 
-    url_endpoint = f"{os.getenv("EVOLUTION_API_URL")}/message/sendReaction/manu"
-
+    api_url = os.getenv("EVOLUTION_API_URL")
+    instance_name = os.getenv("EVOLUTION_INSTANCE_NAME", "Manuela Braun")
+    url_endpoint = f"{api_url}/message/sendReaction/{instance_name}"
     payload = {
     "key": {
         "remoteJid": key['remoteJid'],
